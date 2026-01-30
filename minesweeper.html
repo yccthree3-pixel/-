@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <title>🍭 繽紛可愛踩地雷</title>
+    <style>
+        :root {
+            --bg: #fff5f7;
+            --panel-bg: #ffeaa7;
+            --cell-unrevealed: #fab1a0;
+            --cell-revealed: #ffffff;
+            --text-color: #636e72;
+            --mine-color: #ff7675;
+        }
+        body { background: var(--bg); color: var(--text-color); font-family: 'Comic Sans MS', 'Chalkboard SE', sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+        
+        h1 { margin: 10px 0; color: #fd79a8; text-shadow: 2px 2px #fab1a0; }
+
+        .panel { 
+            background: var(--panel-bg); padding: 15px 25px; border-radius: 20px; 
+            margin-bottom: 15px; display: flex; gap: 40px; 
+            box-shadow: 0 8px 0 #e17055; border: 3px solid #e17055;
+        }
+        .lcd-box { display: flex; flex-direction: column; align-items: center; }
+        .lcd-label { font-size: 14px; font-weight: bold; margin-bottom: 5px; }
+        .lcd { background: #fff; color: #d63031; padding: 5px 15px; font-size: 24px; border-radius: 10px; border: 2px solid #fab1a0; min-width: 50px; text-align: center; font-weight: bold; }
+
+        #grid { 
+            display: grid; grid-template-columns: repeat(20, 32px); grid-template-rows: repeat(15, 32px); 
+            gap: 4px; padding: 10px; background: #ffdad0; border-radius: 15px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1); border: 4px solid #fab1a0;
+        }
+
+        .cell { 
+            width: 32px; height: 32px; background: var(--cell-unrevealed);
+            border-radius: 6px; box-shadow: 0 4px 0 #e17055;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 18px; cursor: pointer; transition: all 0.1s; position: relative;
+        }
+
+        .cell:hover:not(.revealed) { background: #ff8e71; transform: translateY(-2px); }
+        
+        .cell:active:not(.revealed) { transform: translateY(2px); box-shadow: 0 0 0; }
+
+        .cell.revealed { 
+            background: var(--cell-revealed); box-shadow: inset 0 2px 4px rgba(0,0,0,0.05); 
+            border: 1px solid #eee; cursor: default; transform: none;
+        }
+
+        .cell.mine { background: var(--mine-color) !important; animation: pop 0.3s ease; }
+        .cell.flag::after { content: '🍬'; } /* 用糖果代替旗子 */
+
+        @keyframes pop {
+            0% { transform: scale(0.5); }
+            80% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
+
+        .n1 { color: #0984e3; } .n2 { color: #00b894; } .n3 { color: #d63031; }
+        .n4 { color: #6c5ce7; }
+
+        .footer { margin-top: 20px; text-align: center; background: white; padding: 10px 20px; border-radius: 50px; border: 2px dashed #fab1a0; }
+        .kbd { background: #eee; padding: 2px 8px; border-radius: 5px; box-shadow: 0 2px 0 #ccc; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+    <h1>🍭 Candy Sweeper</h1>
+
+    <div class="panel">
+        <div class="lcd-box">
+            <span class="lcd-label">剩餘糖果</span>
+            <span class="lcd" id="mine-count">80</span>
+        </div>
+        <div class="lcd-box">
+            <span class="lcd-label">遊戲時間</span>
+            <span class="lcd" id="timer">000</span>
+        </div>
+    </div>
+    
+    <div id="grid"></div>
+
+    <div class="footer">
+        🖱️ <span class="kbd">左鍵</span> 挖開 &nbsp; | &nbsp;
+        🖱️ <span class="kbd">右鍵</span> 放糖果標記 &nbsp; | &nbsp;
+        ⌨️ <span class="kbd">R</span> 重新開始
+    </div>
+
+    <script>
+        const ROWS = 15, COLS = 20, MINES = 80;
+        let board = [], gameOver = false, firstClick = true, timerInterval = null, seconds = 0;
+
+        function init() {
+            clearInterval(timerInterval);
+            seconds = 0; gameOver = false; firstClick = true;
+            document.getElementById('timer').innerText = "000";
+            document.getElementById('mine-count').innerText = MINES;
+            const grid = document.getElementById('grid');
+            grid.innerHTML = '';
+            board = Array.from({ length: ROWS }, () => []);
+
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    const el = document.createElement('div');
+                    el.className = 'cell';
+                    el.onclick = () => leftClick(r, c);
+                    el.oncontextmenu = (e) => { e.preventDefault(); rightClick(r, c); };
+                    grid.appendChild(el);
+                    board[r][c] = { mine: false, revealed: false, flag: false, count: 0, el };
+                }
+            }
+        }
+
+        function leftClick(r, c) {
+            if (gameOver || board[r][c].flag || board[r][c].revealed) return;
+            if (firstClick) {
+                firstClick = false;
+                setupMines(r, c);
+                timerInterval = setInterval(() => {
+                    seconds = Math.min(seconds + 1, 999);
+                    document.getElementById('timer').innerText = seconds.toString().padStart(3, '0');
+                }, 1000);
+            }
+
+            if (board[r][c].mine) {
+                endGame(false);
+                return;
+            }
+            reveal(r, c);
+            checkWin();
+        }
+
+        function setupMines(exR, exC) {
+            let p = 0;
+            while (p < MINES) {
+                let r = Math.floor(Math.random() * ROWS), c = Math.floor(Math.random() * COLS);
+                // 確保第一踩及其周圍 3x3 區域無雷
+                if (!board[r][c].mine && (Math.abs(r-exR) > 1 || Math.abs(c-exC) > 1)) {
+                    board[r][c].mine = true; p++;
+                }
+            }
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    if (board[r][c].mine) continue;
+                    for (let i=-1; i<=1; i++) for (let j=-1; j<=1; j++) {
+                        let nr = r+i, nc = c+j;
+                        if (nr>=0 && nr<ROWS && nc>=0 && nc<COLS && board[nr][nc].mine) board[r][c].count++;
+                    }
+                }
+            }
+        }
+
+        function reveal(r, c) {
+            if (r<0 || r>=ROWS || c<0 || c>=COLS || board[r][c].revealed || board[r][c].flag) return;
+            const b = board[r][c];
+            b.revealed = true;
+            b.el.classList.add('revealed');
+            b.el.style.boxShadow = "none";
+            if (b.count > 0) {
+                b.el.innerText = b.count;
+                b.el.classList.add('n' + b.count);
+            } else {
+                for (let i=-1; i<=1; i++) for (let j=-1; j<=1; j++) reveal(r+i, c+j);
+            }
+        }
+
+        function rightClick(r, c) {
+            if (gameOver || board[r][c].revealed) return;
+            board[r][c].flag = !board[r][c].flag;
+            board[r][c].el.classList.toggle('flag');
+            const flags = document.querySelectorAll('.flag').length;
+            document.getElementById('mine-count').innerText = Math.max(0, MINES - flags);
+        }
+
+        function endGame(isWin) {
+            gameOver = true;
+            clearInterval(timerInterval);
+            board.forEach(row => row.forEach(b => {
+                if (b.mine) {
+                    b.el.classList.add('mine');
+                    b.el.innerText = '💣';
+                    b.el.style.boxShadow = "none";
+                }
+            }));
+            alert(isWin ? "🌈 太厲害了！你救了所有的糖果！" : "🍪 哎呀！踩到壞掉的小炸彈了。");
+        }
+
+        function checkWin() {
+            const unrevealed = board.flat().filter(b => !b.revealed).length;
+            if (unrevealed === MINES) endGame(true);
+        }
+
+        window.onkeydown = (e) => { if(e.key.toLowerCase()==='r') init(); };
+        init();
+    </script>
+</body>
+</html>
